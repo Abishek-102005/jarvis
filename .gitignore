@@ -1,0 +1,34 @@
+# ── Secrets — never commit ───────────────────────────────────────────────
+config/api_keys.json
+config/certs/
+*.pem
+*.key
+
+# Local WhatsApp UI captures and contact-specific live test
+docs/whatsapp_actual_*.txt
+docs/whatsapp_desktop_call_investigation.md
+live_test_runner.py
+
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ── Runtime state ────────────────────────────────────────────────────────
+memory/*.json
+config/devices.json
+config/device_audit.log
+uploads/
+*.log
+
+# ── Editor / OS ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.bak
+
+.env

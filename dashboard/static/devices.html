@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>JARVIS — Devices</title>
+<style>
+  :root { --bg:#060b14; --card:#0d1626; --line:#1b2a44; --fg:#d7e6ff; --dim:#7f93b5; --acc:#00d4ff; --ok:#2ee59d; --bad:#ff5c7a; --warn:#ffb020; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui,sans-serif; padding:env(safe-area-inset-top) 0 40px; }
+  header { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
+  header a { color:var(--acc); text-decoration:none; font-size:14px; }
+  header h1 { font-size:17px; margin:0; letter-spacing:.08em; flex:1; }
+  main { max-width:760px; margin:0 auto; padding:16px; display:grid; gap:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .card h2 { margin:0 0 8px; font-size:14px; letter-spacing:.06em; color:var(--acc); text-transform:uppercase; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--dim); display:inline-block; }
+  .dot.on { background:var(--ok); box-shadow:0 0 8px var(--ok); }
+  button { background:#12233d; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:7px 12px; font:inherit; font-size:13px; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.primary { background:var(--acc); color:#001018; border-color:var(--acc); font-weight:600; }
+  button.danger { color:var(--bad); }
+  button:disabled { opacity:.4; cursor:default; }
+  .chip { font-size:12px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); color:var(--dim); }
+  .chip.sens { color:var(--warn); border-color:#5a4210; }
+  label.scope { display:inline-flex; gap:6px; align-items:center; font-size:13px; margin:4px 12px 4px 0; }
+  .sens-t { color:var(--warn); }
+  code, pre { background:#08111f; border:1px solid var(--line); border-radius:8px; padding:8px 10px; display:block; overflow-x:auto; font-size:12.5px; user-select:all; white-space:pre-wrap; word-break:break-all; }
+  .dim { color:var(--dim); font-size:13px; }
+  .big { font-size:28px; letter-spacing:.2em; font-weight:700; color:var(--acc); }
+  #out { white-space:pre-wrap; font-size:13px; color:var(--dim); min-height:20px; }
+  #notice { position:fixed; left:12px; right:12px; bottom:12px; background:var(--acc); color:#001018; padding:14px; border-radius:12px; display:none; font-weight:600; z-index:20; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  td { padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; color:var(--dim); }
+</style>
+</head>
+<body>
+<header><a href="/">&larr; Back</a><h1>DEVICES</h1><span class="dim" id="who"></span></header>
+<main>
+
+  <section class="card">
+    <h2>Your devices</h2>
+    <div id="list" class="dim">Loading…</div>
+    <div id="out"></div>
+  </section>
+
+  <section class="card">
+    <h2>Add a computer or laptop</h2>
+    <p class="dim">On the other machine, install the agent and pair it. Nothing is reachable until you do this, and you stay in control of what it can do.</p>
+    <div class="row"><button class="primary" id="newcode">Generate pairing code</button></div>
+    <div id="codebox" style="display:none;margin-top:12px">
+      <div class="big" id="code"></div>
+      <p class="dim">Valid for 5 minutes, single use. Run this on the other machine:</p>
+      <pre id="cmd"></pre>
+      <p class="dim">Certificate fingerprint (the agent shows this too — they should match):</p>
+      <code id="fp"></code>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Use this phone as a device</h2>
+    <p class="dim">Keep this page open on your phone and JARVIS can ring it, send it messages, check its battery and (if you allow it) find it. Browsers pause pages when the phone is locked, so the phone shows as offline then.</p>
+    <div id="phone-off">
+      <button class="primary" id="phone-join">Add this phone</button>
+    </div>
+    <div id="phone-on" style="display:none">
+      <div class="row"><span class="dot" id="pdot"></span><strong id="pname"></strong><span class="dim" id="pstate"></span></div>
+      <div style="margin-top:8px">
+        <label class="scope"><input type="checkbox" id="ok-ring" checked> Allow ring &amp; messages</label>
+        <label class="scope"><input type="checkbox" id="ok-locate"> Allow location</label>
+        <label class="scope"><input type="checkbox" id="ok-awake"> Keep screen awake</label>
+      </div>
+      <div class="row" style="margin-top:6px"><button id="phone-leave" class="danger">Remove this phone</button></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Activity</h2>
+    <div id="audit" class="dim">Loading…</div>
+  </section>
+</main>
+<div id="notice"></div>
+
+<script>
+const TOKEN = sessionStorage.getItem('jarvis_token');
+if (!TOKEN) location.href = '/login';
+const H = { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' };
+const SENS = new Set();
+let ALL = [];
+const $ = id => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) { if (k === 'class') n.className = v; else if (k.startsWith('on')) n[k] = v; else n.setAttribute(k, v); }
+  for (const k of kids) n.append(k);
+  return n;
+};
+const api = async (path, body) => {
+  const r = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: H, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (r.status === 401) { location.href = '/login'; return {}; }
+  return r.json();
+};
+const say = t => { $('out').textContent = t; };
+
+const LABEL = { 'status':'Status', 'notify':'Messages', 'lock':'Lock screen', 'ring':'Ring', 'locate':'Location',
+                'files.list':'List files', 'files.read':'Read files', 'screenshot':'Screenshot', 'apps.open':'Open apps' };
+
+async function send(dev, cmd, args = {}) {
+  say(`${cmd} → ${dev.name}…`);
+  const r = await api(`/api/devices/${dev.id}/command`, { cmd, args });
+  say(r.ok ? `${dev.name}: ` + JSON.stringify(r) : `${dev.name}: ${r.error || 'failed'}`);
+  loadAudit();
+}
+
+function deviceCard(d) {
+  const kind = { phone:'📱', laptop:'💻', pc:'🖥️' }[d.kind] || '🖥️';
+  const head = el('div', { class:'row' }, el('span', { class:'dot' + (d.online ? ' on' : '') }),
+    el('strong', {}, `${kind} ${d.name}`), el('span', { class:'dim' }, d.online ? 'online' : 'offline'),
+    el('span', { class:'dim' }, d.platform || ''));
+  const acts = el('div', { class:'row', style:'margin-top:8px' });
+  const can = s => d.scopes.includes(s);
+  const add = (label, cmd, scope, argsFn) => { const b = el('button', { onclick: () => send(d, cmd, argsFn ? argsFn() : {}) }, label);
+    if (!d.online || (scope && !can(scope))) b.disabled = true; acts.append(b); };
+  add('Status', 'status', 'status');
+  add('Message', 'notify', 'notify', () => ({ message: prompt('Message to show on ' + d.name) || 'Hello from JARVIS' }));
+  if (d.kind === 'phone') { add('Ring', 'ring', 'ring'); add('Locate', 'locate', 'locate'); }
+  else { add('Lock', 'lock', 'lock'); add('Screenshot', 'screenshot', 'screenshot');
+         add('Files', 'list_files', 'files.list', () => ({ path: prompt('Folder (blank = shared root)') || '.' })); }
+  const scopes = el('details', { style:'margin-top:8px' }, el('summary', { class:'dim' }, 'Permissions'));
+  const wrap = el('div', {});
+  const relevant = ALL.filter(s => d.kind === 'phone' ? ['status','notify','ring','locate'].includes(s) : !['ring','locate'].includes(s));
+  for (const s of relevant) {
+    const cb = el('input', { type:'checkbox' }); cb.checked = can(s); cb.dataset.scope = s;
+    wrap.append(el('label', { class:'scope' + (SENS.has(s) ? ' sens-t' : '') }, cb, (LABEL[s] || s) + (SENS.has(s) ? ' ⚠' : '')));
+  }
+  wrap.append(el('div', { class:'row', style:'margin-top:6px' },
+    el('button', { onclick: async () => {
+      const chosen = [...wrap.querySelectorAll('input:checked')].map(i => i.dataset.scope);
+      await api(`/api/devices/${d.id}/scopes`, { scopes: chosen }); say('Permissions saved.'); load(); } }, 'Save permissions'),
+    el('button', { class:'danger', onclick: async () => { if (confirm(`Remove ${d.name}? It will be disconnected immediately.`)) { await api(`/api/devices/${d.id}/revoke`, {}); load(); } } }, 'Remove device')));
+  wrap.append(el('div', { class:'dim' }, '⚠ = sensitive. The device must also allow it locally.'));
+  scopes.append(wrap);
+  return el('div', { style:'padding:10px 0;border-top:1px solid var(--line)' }, head, acts, scopes);
+}
+
+async function load() {
+  const data = await api('/api/devices');
+  ALL = data.all_scopes || []; (data.sensitive || []).forEach(s => SENS.add(s));
+  const list = $('list'); list.textContent = '';
+  if (!data.devices.length) { list.textContent = 'No devices paired yet.'; }
+  data.devices.forEach(d => list.append(deviceCard(d)));
+  syncPhoneUI(data.devices);
+}
+
+async function loadAudit() {
+  const { events = [] } = await api('/api/devices/audit');
+  const t = el('table');
+  events.slice(-25).reverse().forEach(e => {
+    const detail = [e.device, e.cmd, e.source].filter(Boolean).join(' · ');
+    t.append(el('tr', {}, el('td', {}, e.ts.slice(5)), el('td', {}, e.event), el('td', {}, detail)));
+  });
+  $('audit').textContent = ''; $('audit').append(events.length ? t : 'Nothing yet.');
+}
+
+$('newcode').onclick = async () => {
+  const r = await api('/api/devices/pair-code', {});
+  $('codebox').style.display = 'block';
+  $('code').textContent = r.code;
+  $('cmd').textContent = `python jarvis_agent.py pair --hub ${r.url} --code ${r.code} --name "My Laptop"` + (r.fingerprint ? ` --fingerprint ${r.fingerprint}` : '');
+  $('fp').textContent = r.fingerprint || '(dashboard is using plain HTTP — pair only on a network you trust)';
+};
+
+/* ───────── This phone as a device ───────── */
+const LS = 'jarvis_phone_device';
+let ws = null, ringTimer = null, audioCtx = null, wake = null;
+const phone = () => { try { return JSON.parse(localStorage.getItem(LS) || 'null'); } catch { return null; } };
+
+function banner(msg) { const n = $('notice'); n.textContent = msg + '  (tap to dismiss)'; n.style.display = 'block'; n.onclick = () => { n.style.display = 'none'; stopRing(); }; }
+function stopRing() { if (ringTimer) { clearInterval(ringTimer); ringTimer = null; } }
+function ring() {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  const beep = () => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.frequency.value = 880; g.gain.value = .25;
+    o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + .35); if (navigator.vibrate) navigator.vibrate(300); };
+  stopRing(); beep(); ringTimer = setInterval(beep, 800); setTimeout(stopRing, 20000);
+  banner('JARVIS is ringing this phone');
+}
+
+async function phoneHandle(msg) {
+  const reply = (ok, result) => ws.send(JSON.stringify({ type:'result', id:msg.id, ok, result }));
+  try {
+    switch (msg.cmd) {
+      case 'ping': return reply(true, { ok:true, pong:true });
+      case 'status': {
+        const r = { ok:true, os: navigator.userAgent.slice(0, 80) };
+        if (navigator.getBattery) { const b = await navigator.getBattery(); r.battery_percent = Math.round(b.level * 100); r.charging = b.charging; }
+        else r.note = 'This browser does not expose battery info.';
+        return reply(true, r);
+      }
+      case 'notify':
+        if (!$('ok-ring').checked) return reply(false, { ok:false, error:'Messages are switched off on this phone.' });
+        banner(String((msg.args && msg.args.message) || 'Message from JARVIS').slice(0, 300));
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        return reply(true, { ok:true });
+      case 'ring':
+        if (!$('ok-ring').checked) return reply(false, { ok:false, error:'Ringing is switched off on this phone.' });
+        ring(); return reply(true, { ok:true });
+      case 'locate':
+        if (!$('ok-locate').checked) return reply(false, { ok:false, error:'Location sharing is switched off on this phone.' });
+        return navigator.geolocation.getCurrentPosition(
+          p => reply(true, { ok:true, lat:p.coords.latitude, lon:p.coords.longitude, accuracy_m:p.coords.accuracy }),
+          e => reply(false, { ok:false, error:'Location unavailable: ' + e.message }), { enableHighAccuracy:true, timeout:15000 });
+      default: return reply(false, { ok:false, error:'This phone does not support that.' });
+    }
+  } catch (e) { reply(false, { ok:false, error:String(e) }); }
+}
+
+function phoneConnect() {
+  const p = phone(); if (!p) return;
+  if (ws) try { ws.close(); } catch {}
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/agent?token=' + encodeURIComponent(p.token));
+  ws.onopen = () => { $('pdot').className = 'dot on'; $('pstate').textContent = 'connected'; };
+  ws.onclose = e => { $('pdot').className = 'dot'; $('pstate').textContent = (e.code === 4001 || e.code === 4003) ? 'removed by JARVIS' : 'reconnecting…';
+    if (e.code === 4001 || e.code === 4003) { localStorage.removeItem(LS); syncPhoneUI(); return; } setTimeout(phoneConnect, 3000); };
+  ws.onmessage = ev => { let m; try { m = JSON.parse(ev.data); } catch { return; } if (m.type === 'cmd') phoneHandle(m); };
+}
+
+function syncPhoneUI(devices) {
+  const p = phone();
+  $('phone-off').style.display = p ? 'none' : 'block';
+  $('phone-on').style.display = p ? 'block' : 'none';
+  if (p) { $('pname').textContent = p.name; if (!ws || ws.readyState > 1) phoneConnect(); }
+}
+
+$('phone-join').onclick = async () => {
+  const name = (prompt('Name for this phone', 'My Phone') || '').trim(); if (!name) return;
+  const { code } = await api('/api/devices/pair-code', {});
+  const r = await fetch('/api/devices/pair', { method:'POST', headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({ code, name, kind:'phone', platform: navigator.platform || 'phone' }) }).then(x => x.json());
+  if (!r.token) { say(r.error || 'Could not add this phone.'); return; }
+  localStorage.setItem(LS, JSON.stringify({ name, token:r.token, id:r.id }));
+  syncPhoneUI(); load();
+};
+$('phone-leave').onclick = async () => {
+  const p = phone(); if (!p) return;
+  if (!confirm('Remove this phone from JARVIS?')) return;
+  await api(`/api/devices/${p.id}/revoke`, {}); localStorage.removeItem(LS); if (ws) ws.close(); syncPhoneUI(); load();
+};
+$('ok-awake').onchange = async e => {
+  try { if (e.target.checked && navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); else if (wake) { wake.release(); wake = null; } }
+  catch { e.target.checked = false; say('Could not keep the screen awake on this browser.'); }
+};
+
+load(); loadAudit(); setInterval(() => { if (!document.querySelector('#list details[open]')) load(); }, 15000); setInterval(loadAudit, 20000);
+</script>
+</body>
+</html>
